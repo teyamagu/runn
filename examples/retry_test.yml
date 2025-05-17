@@ -1,0 +1,12 @@
+desc: Retry test
+steps:
+  sleep10:
+    exec:
+      command: sleep 1
+  timer1:
+    exec:
+      command: date
+  dumpDate:
+    dump: steps.timer1.stdout
+    test: |
+      steps.timer1.stdout contains "6"

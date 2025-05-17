@@ -144,6 +144,7 @@ func init() {
 	runCmd.Flags().IntVarP(&flgs.ShardIndex, "shard-index", "", 0, flgs.Usage("ShardIndex"))
 	runCmd.Flags().IntVarP(&flgs.ShardN, "shard-n", "", 0, flgs.Usage("ShardN"))
 	runCmd.Flags().IntVarP(&flgs.Random, "random", "", 0, flgs.Usage("Random"))
+	runCmd.Flags().IntVarP(&flgs.MaxRetries, "max-retries", "", 0, flgs.Usage("MaxRetries"))
 	runCmd.Flags().StringVarP(&flgs.Format, "format", "", "", flgs.Usage("Format"))
 	runCmd.Flags().BoolVarP(&flgs.Profile, "profile", "", false, flgs.Usage("Profile"))
 	runCmd.Flags().StringVarP(&flgs.ProfileOut, "profile-out", "", "runn.prof", flgs.Usage("ProfileOut"))

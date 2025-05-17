@@ -1210,6 +1210,20 @@ func Scopes(scopes ...string) Option {
 	}
 }
 
+// MaxRetries - Set the maximum number of retries for runbook execution.
+func MaxRetries(n int) Option { //nostyle:repetition
+    return func(bk *book) error {
+		if bk == nil {
+			return ErrNilBook
+		}
+		if n < 0 {
+            return fmt.Errorf("maxRetries must be greater than or equal to 0")
+        }
+        bk.maxRetries = n
+        return nil
+    }
+}
+
 // HostRules - Set host rules for runn.
 func HostRules(rules ...string) Option {
 	return func(bk *book) error {

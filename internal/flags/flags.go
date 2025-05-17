@@ -68,6 +68,7 @@ type Flags struct {
 	CacheDir        string   `usage:"specify cache directory for remote runbooks"`
 	RetainCacheDir  bool     `usage:"retain cache directory for remote runbooks"`
 	Scopes          []string `usage:"additional scopes for runn"`
+	MaxRetries      int      `usage:"maximum number of retries for runbook execution"`
 	HostRules       []string `usage:"host rules for runn. (\"host rule,host rule,...\")"`
 	WaitTimeout     string   `usage:"timeout for waiting for cleanup process after running runbooks"`
 	EnvFile         string   `usage:"load environment variables from a file"`
@@ -161,6 +162,9 @@ func (f *Flags) ToOpts() ([]runn.Option, error) {
 	}
 	if f.ShardN > 0 {
 		opts = append(opts, runn.RunShard(f.ShardN, f.ShardIndex))
+	}
+	if f.MaxRetries > 0 {
+		opts = append(opts, runn.MaxRetries(f.MaxRetries))
 	}
 
 	for _, v := range f.Vars {

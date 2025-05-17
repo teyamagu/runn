@@ -64,6 +64,7 @@ type operator struct {
 	sshRunners      map[string]*sshRunner
 	includeRunners  map[string]*includeRunner
 	steps           []*step
+	maxRetries      int // Maximum number of retries for steps
 	deferred        *deferredOpAndSteps
 	store           *store.Store
 	desc            string
@@ -460,6 +461,7 @@ func New(opts ...Option) (*operator, error) {
 		cdpRunners:     map[string]*cdpRunner{},
 		sshRunners:     map[string]*sshRunner{},
 		includeRunners: map[string]*includeRunner{},
+		maxRetries:     bk.maxRetries,
 		deferred:       &deferredOpAndSteps{},
 		store:          st,
 		useMap:         bk.useMap,
@@ -1228,42 +1230,67 @@ func (op *operator) runInternal(ctx context.Context) (rerr error) {
 	force := op.force
 	var deferred []*deferredOpAndStep
 
-	for _, s := range op.steps {
-		if s.deferred {
-			d := &deferredOpAndStep{op: op, step: s}
-			deferred = append([]*deferredOpAndStep{d}, deferred...)
-			op.deferred.steps = append([]*deferredOpAndStep{d}, op.deferred.steps...)
-			op.record(s.idx, nil)
-			continue
+	var lastErr error
+	for stepsRetry := 0; stepsRetry < op.maxRetries+1; stepsRetry++ {
+		if stepsRetry > 0 {
+			op.Debugf(yellow("Retrying runbook execution (%d/%d)...\n"), stepsRetry, op.maxRetries)
+			// リトライ前に結果をクリア
+			op.clearResult()
+			op.store.ClearSteps()
 		}
-		if failed && !force && !s.force {
-			s.setResult(errStepSkipped)
-			op.recordNotRun(s.idx)
-			if err := op.recordResult(s.idx, resultSkipped); err != nil {
-				return err
+
+		failed = false
+		// op.deferred.steps = []*deferredOpAndStep{}
+
+		for _, s := range op.steps {
+			if s.deferred {
+				d := &deferredOpAndStep{op: op, step: s}
+				deferred = append([]*deferredOpAndStep{d}, deferred...)
+				op.deferred.steps = append([]*deferredOpAndStep{d}, op.deferred.steps...)
+				op.record(s.idx, nil)
+				continue
 			}
-			continue
+			if failed && !force && !s.force {
+				s.setResult(errStepSkipped)
+				op.recordNotRun(s.idx)
+				if err := op.recordResult(s.idx, resultSkipped); err != nil {
+					return err
+				}
+				continue
+			}
+			err := op.runStep(ctx, s)
+			s.setResult(err)
+			switch {
+			case errors.Is(errStepSkipped, err):
+				op.recordNotRun(s.idx)
+				if err := op.recordResult(s.idx, resultSkipped); err != nil {
+					return err
+				}
+			case err != nil:
+				op.recordNotRun(s.idx)
+				if err := op.recordResult(s.idx, resultFailure); err != nil {
+					return err
+				}
+				lastErr = err
+				failed = true
+				if stepsRetry < op.maxRetries-1 {
+					break // 次のリトライへ
+				}
+			default:
+				if err := op.recordResult(s.idx, resultSuccess); err != nil {
+					return err
+				}
+			}
 		}
-		err := op.runStep(ctx, s)
-		s.setResult(err)
-		switch {
-		case errors.Is(errStepSkipped, err):
-			op.recordNotRun(s.idx)
-			if err := op.recordResult(s.idx, resultSkipped); err != nil {
-				return err
-			}
-		case err != nil:
-			op.recordNotRun(s.idx)
-			if err := op.recordResult(s.idx, resultFailure); err != nil {
-				return err
-			}
-			rerr = errors.Join(rerr, err)
-			failed = true
-		default:
-			if err := op.recordResult(s.idx, resultSuccess); err != nil {
-				return err
-			}
+
+		if !failed {
+			break // 成功したらリトライを終了
 		}
+	}
+
+	if failed {
+		rerr = errors.Join(rerr, lastErr)
+		return
 	}
 
 	// deferred steps

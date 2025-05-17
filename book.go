@@ -39,6 +39,7 @@ type book struct {
 	vars                 map[string]any
 	secrets              []string
 	rawSteps             []map[string]any
+	maxRetries           int
 	hostRules            hostRules
 	hostRulesFromOpts    hostRules
 	debug                bool
