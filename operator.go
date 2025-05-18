@@ -1230,17 +1230,20 @@ func (op *operator) runInternal(ctx context.Context) (rerr error) {
 	force := op.force
 	var deferred []*deferredOpAndStep
 
-	var lastErr error
-	for stepsRetry := 0; stepsRetry < op.maxRetries+1; stepsRetry++ {
+	var lastErrStep error
+	var lastErrDeferredStep error
+	for stepsRetry := range op.maxRetries + 1 {
 		if stepsRetry > 0 {
 			op.Debugf(yellow("Retrying runbook execution (%d/%d)...\n"), stepsRetry, op.maxRetries)
-			// リトライ前に結果をクリア
+			// clear results
 			op.clearResult()
 			op.store.ClearSteps()
+			op.deferred.steps = []*deferredOpAndStep(nil)
+			deferred = []*deferredOpAndStep(nil)
+			failed = false
+			lastErrStep = nil
+			lastErrDeferredStep = nil
 		}
-
-		failed = false
-		// op.deferred.steps = []*deferredOpAndStep{}
 
 		for _, s := range op.steps {
 			if s.deferred {
@@ -1271,11 +1274,8 @@ func (op *operator) runInternal(ctx context.Context) (rerr error) {
 				if err := op.recordResult(s.idx, resultFailure); err != nil {
 					return err
 				}
-				lastErr = err
+				lastErrStep = errors.Join(lastErrStep, err)
 				failed = true
-				if stepsRetry < op.maxRetries-1 {
-					break // 次のリトライへ
-				}
 			default:
 				if err := op.recordResult(s.idx, resultSuccess); err != nil {
 					return err
@@ -1283,36 +1283,44 @@ func (op *operator) runInternal(ctx context.Context) (rerr error) {
 			}
 		}
 
+		if (failed) && (stepsRetry < op.maxRetries-1) {
+			continue
+		}
+
+		// deferred steps
+		if op.included {
+			rerr = errors.Join(rerr, lastErrStep)
+			return
+		}
+
+		for _, os := range op.deferred.steps {
+			err := os.op.runStep(ctx, os.step)
+			os.step.setResult(err)
+			switch {
+			case err != nil:
+				os.op.recordNotRun(os.step.idx)
+				if err := os.op.recordResult(os.step.idx, resultFailure); err != nil {
+					return err
+				}
+				lastErrDeferredStep = errors.Join(lastErrDeferredStep, err)
+				failed = true
+			default:
+				if err := os.op.recordResult(os.step.idx, resultSuccess); err != nil {
+					return err
+				}
+			}
+		}
+
 		if !failed {
-			break // 成功したらリトライを終了
+			break
 		}
 	}
 
-	if failed {
-		rerr = errors.Join(rerr, lastErr)
-		return
+	if failed && (lastErrStep != nil) {
+		rerr = errors.Join(rerr, lastErrStep)
 	}
-
-	// deferred steps
-	if op.included {
-		return
-	}
-
-	for _, os := range op.deferred.steps {
-		err := os.op.runStep(ctx, os.step)
-		os.step.setResult(err)
-		switch {
-		case err != nil:
-			os.op.recordNotRun(os.step.idx)
-			if err := os.op.recordResult(os.step.idx, resultFailure); err != nil {
-				return err
-			}
-			rerr = errors.Join(rerr, err)
-		default:
-			if err := os.op.recordResult(os.step.idx, resultSuccess); err != nil {
-				return err
-			}
-		}
+	if failed && (lastErrDeferredStep != nil) {
+		rerr = errors.Join(rerr, lastErrDeferredStep)
 	}
 
 	return
